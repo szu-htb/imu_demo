@@ -1,10 +1,13 @@
 #include "imu_demo/imu_node.hpp"
+#include <rclcpp_components/register_node_macro.hpp>
 
 using namespace std::chrono_literals;
 
-ImuNode::ImuNode() : Node("bmi088_node")
+ImuNode::ImuNode(const rclcpp::NodeOptions& options)
+    : Node("bmi088_node", options)
 {
-    imu_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("imu/data_raw", 10);
+    imu_pub_ = this->create_publisher<sensor_msgs::msg::Imu>(
+        "imu/data_raw", rclcpp::SensorDataQoS());
 
     try {
         driver_ = std::make_unique<Bmi088Driver>("/dev/spidev1.0", 394, 396);
@@ -37,15 +40,9 @@ void ImuNode::timer_callback()
         msg.angular_velocity.x    = data.gx;
         msg.angular_velocity.y    = data.gy;
         msg.angular_velocity.z    = data.gz;
-        msg.orientation_covariance[0] = -1.0;  // -1 告知下游（EKF 等）本节点不提供姿态估计
+        msg.orientation_covariance[0] = -1.0;
         imu_pub_->publish(msg);
     }
 }
 
-int main(int argc, char* argv[])
-{
-    rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<ImuNode>());
-    rclcpp::shutdown();
-    return 0;
-}
+RCLCPP_COMPONENTS_REGISTER_NODE(ImuNode)

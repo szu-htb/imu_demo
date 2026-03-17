@@ -10,36 +10,42 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
-add_executable(bmi088_node
+add_library(imu_components SHARED
   src/bmi088_driver.cpp
   src/imu_node.cpp
+  src/imu_preprocess_node.cpp
 )
 
-target_include_directories(bmi088_node PUBLIC
+target_include_directories(imu_components PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
 
-ament_target_dependencies(
-  bmi088_node
+ament_target_dependencies(imu_components
   "rclcpp"
+  "rclcpp_components"
   "sensor_msgs"
 )
 
+rclcpp_components_register_node(imu_components PLUGIN "ImuNode" EXECUTABLE bmi088_node)
+rclcpp_components_register_node(imu_components PLUGIN "ImuPreprocessNode" EXECUTABLE imu_preprocess_node)
 
-install(TARGETS bmi088_node
-  DESTINATION lib/${PROJECT_NAME})
+install(TARGETS imu_components
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
+)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()

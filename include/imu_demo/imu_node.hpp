@@ -8,7 +8,7 @@
 
 class ImuNode : public rclcpp::Node {
 public:
-    ImuNode();
+    explicit ImuNode(const rclcpp::NodeOptions& options);
 
 private:
     void timer_callback();
