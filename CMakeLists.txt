@@ -5,13 +5,16 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
 add_executable(bmi088_node
-  src/bmi088_node.cpp
+  src/bmi088_driver.cpp
+  src/imu_node.cpp
 )
 
 target_include_directories(bmi088_node PUBLIC

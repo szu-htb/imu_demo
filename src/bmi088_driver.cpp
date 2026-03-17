@@ -1,4 +1,4 @@
-#include "imu_demo/bmi088_node.hpp"
+#include "imu_demo/bmi088_driver.hpp"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -8,8 +8,6 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
-
-using namespace std::chrono_literals;
 
 // ---------------------------------------------------------
 // 寄存器地址
@@ -214,8 +212,7 @@ bool Bmi088Driver::initialize()
 // ---------------------------------------------------------
 // 数据读取
 // ---------------------------------------------------------
-bool Bmi088Driver::read_imu_data(double& ax, double& ay, double& az,
-                                 double& gx, double& gy, double& gz)
+bool Bmi088Driver::read_imu_data(ImuRawData& data)
 {
     uint8_t acc_raw[6]  = {};
     uint8_t gyro_raw[6] = {};
@@ -235,63 +232,12 @@ bool Bmi088Driver::read_imu_data(double& ax, double& ay, double& az,
     constexpr double ACC_SCALE  = (6.0 * 9.80665)         / 32768.0;
     constexpr double GYRO_SCALE = (2000.0 * M_PI / 180.0) / 32768.0;
 
-    ax = raw_ax * ACC_SCALE;
-    ay = raw_ay * ACC_SCALE;
-    az = raw_az * ACC_SCALE;
-    gx = raw_gx * GYRO_SCALE;
-    gy = raw_gy * GYRO_SCALE;
-    gz = raw_gz * GYRO_SCALE;
+    data.ax = raw_ax * ACC_SCALE;
+    data.ay = raw_ay * ACC_SCALE;
+    data.az = raw_az * ACC_SCALE;
+    data.gx = raw_gx * GYRO_SCALE;
+    data.gy = raw_gy * GYRO_SCALE;
+    data.gz = raw_gz * GYRO_SCALE;
 
     return true;
-}
-
-// ---------------------------------------------------------
-// ROS 2 节点
-// ---------------------------------------------------------
-Bmi088Node::Bmi088Node() : Node("bmi088_node")
-{
-    imu_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("imu/data_raw", 10);
-
-    try {
-        driver_ = std::make_unique<Bmi088Driver>("/dev/spidev1.0", 394, 396);
-        if (!driver_->initialize()) {
-            RCLCPP_ERROR(this->get_logger(), "BMI088 Chip ID mismatch! Check wiring.");
-            return;
-        }
-        RCLCPP_INFO(this->get_logger(), "BMI088 initialized successfully.");
-    } catch (const std::exception& e) {
-        RCLCPP_ERROR(this->get_logger(), "Driver init exception: %s", e.what());
-        return;
-    }
-
-    // timer 仅在初始化成功后创建，故 timer_callback 中 driver_ 必然有效
-    timer_ = this->create_wall_timer(
-        5ms, std::bind(&Bmi088Node::timer_callback, this));
-}
-
-void Bmi088Node::timer_callback()
-{
-    auto msg = sensor_msgs::msg::Imu();
-    msg.header.stamp    = this->get_clock()->now();
-    msg.header.frame_id = "imu_link";
-
-    double ax, ay, az, gx, gy, gz;
-    if (driver_->read_imu_data(ax, ay, az, gx, gy, gz)) {
-        msg.linear_acceleration.x = ax;
-        msg.linear_acceleration.y = ay;
-        msg.linear_acceleration.z = az;
-        msg.angular_velocity.x    = gx;
-        msg.angular_velocity.y    = gy;
-        msg.angular_velocity.z    = gz;
-        msg.orientation_covariance[0] = -1.0;  // -1 告知下游（EKF 等）本节点不提供姿态估计
-        imu_pub_->publish(msg);
-    }
-}
-
-int main(int argc, char* argv[])
-{
-    rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<Bmi088Node>());
-    rclcpp::shutdown();
-    return 0;
 }

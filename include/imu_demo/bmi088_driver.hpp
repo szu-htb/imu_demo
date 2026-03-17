@@ -1,10 +1,13 @@
-#ifndef BMI088_NODE_HPP_
-#define BMI088_NODE_HPP_
+#ifndef BMI088_DRIVER_HPP_
+#define BMI088_DRIVER_HPP_
 
 #include <string>
-#include <memory>
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/imu.hpp>
+#include <cstdint>
+
+struct ImuRawData {
+    double ax, ay, az;  // m/s²
+    double gx, gy, gz;  // rad/s
+};
 
 class Bmi088Driver {
 public:
@@ -17,8 +20,7 @@ public:
     ~Bmi088Driver();
 
     bool initialize();
-    bool read_imu_data(double& ax, double& ay, double& az,
-                       double& gx, double& gy, double& gz);
+    bool read_imu_data(ImuRawData& data);
 
 private:
     int spi_fd_;
@@ -36,16 +38,4 @@ private:
     void    read_gyro_burst(uint8_t start_reg, uint8_t* data);
 };
 
-class Bmi088Node : public rclcpp::Node {
-public:
-    Bmi088Node();
-
-private:
-    void timer_callback();
-
-    std::unique_ptr<Bmi088Driver> driver_;
-    rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
-    rclcpp::TimerBase::SharedPtr timer_;
-};
-
-#endif  // BMI088_NODE_HPP_
+#endif  // BMI088_DRIVER_HPP_
