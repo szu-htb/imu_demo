@@ -16,7 +16,6 @@ find_package(sensor_msgs REQUIRED)
 add_library(imu_components SHARED
   src/bmi088_driver.cpp
   src/imu_node.cpp
-  src/imu_preprocess_node.cpp
 )
 
 target_include_directories(imu_components PUBLIC
@@ -31,7 +30,6 @@ ament_target_dependencies(imu_components
 )
 
 rclcpp_components_register_node(imu_components PLUGIN "ImuNode" EXECUTABLE bmi088_node)
-rclcpp_components_register_node(imu_components PLUGIN "ImuPreprocessNode" EXECUTABLE imu_preprocess_node)
 
 install(TARGETS imu_components
   ARCHIVE DESTINATION lib

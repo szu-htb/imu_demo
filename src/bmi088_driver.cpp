@@ -122,7 +122,7 @@ void Bmi088Driver::cs_high(int cs_fd)
 }
 
 // 所有读写函数的公共 SPI 事务，消除重复的 spi_ioc_transfer 初始化
-void Bmi088Driver::spi_transfer(const uint8_t* tx, uint8_t* rx, size_t len, int cs_fd)
+bool Bmi088Driver::spi_transfer(const uint8_t* tx, uint8_t* rx, size_t len, int cs_fd)
 {
     struct spi_ioc_transfer tr = {};
     tr.tx_buf   = (unsigned long)tx;
@@ -130,8 +130,9 @@ void Bmi088Driver::spi_transfer(const uint8_t* tx, uint8_t* rx, size_t len, int 
     tr.len      = len;
     tr.speed_hz = SPI_SPEED_HZ;
     cs_low(cs_fd);
-    ioctl(spi_fd_, SPI_IOC_MESSAGE(1), &tr);
+    int ret = ioctl(spi_fd_, SPI_IOC_MESSAGE(1), &tr);
     cs_high(cs_fd);
+    return ret >= 0;
 }
 
 void Bmi088Driver::write_register(uint8_t reg, uint8_t value, int cs_fd)
@@ -156,20 +157,22 @@ uint8_t Bmi088Driver::read_gyro_register(uint8_t reg)
     return rx[1];
 }
 
-void Bmi088Driver::read_acc_burst(uint8_t start_reg, uint8_t* data)
+bool Bmi088Driver::read_acc_burst(uint8_t start_reg, uint8_t* data)
 {
     uint8_t tx[8] = { static_cast<uint8_t>(start_reg | 0x80) };
     uint8_t rx[8] = {};
-    spi_transfer(tx, rx, 8, acc_cs_fd_);
+    if (!spi_transfer(tx, rx, 8, acc_cs_fd_)) return false;
     std::memcpy(data, rx + 2, 6);  // 跳过 rx[0]（无关）和 rx[1]（ACC Dummy Byte）
+    return true;
 }
 
-void Bmi088Driver::read_gyro_burst(uint8_t start_reg, uint8_t* data)
+bool Bmi088Driver::read_gyro_burst(uint8_t start_reg, uint8_t* data)
 {
     uint8_t tx[7] = { static_cast<uint8_t>(start_reg | 0x80) };
     uint8_t rx[7] = {};
-    spi_transfer(tx, rx, 7, gyro_cs_fd_);
+    if (!spi_transfer(tx, rx, 7, gyro_cs_fd_)) return false;
     std::memcpy(data, rx + 1, 6);  // 跳过 rx[0]（无关）
+    return true;
 }
 
 // ---------------------------------------------------------
@@ -177,7 +180,7 @@ void Bmi088Driver::read_gyro_burst(uint8_t start_reg, uint8_t* data)
 // ---------------------------------------------------------
 bool Bmi088Driver::initialize()
 {
-    // Step 1：CSB1 上升沿触发 ACC 从 I2C 模式切换到 SPI 模式（规格书§6.1.2）
+    // Step 1：dummy read -> CSB1 上升沿触发 ACC 从 I2C 模式切换到 SPI 模式（规格书§6.1.2）
     read_acc_register(ACC_CHIP_ID_REG);
     usleep(1000);
 
@@ -217,8 +220,10 @@ bool Bmi088Driver::read_imu_data(ImuRawData& data)
     uint8_t acc_raw[6]  = {};
     uint8_t gyro_raw[6] = {};
 
-    read_acc_burst(ACC_DATA_START,   acc_raw);
-    read_gyro_burst(GYRO_DATA_START, gyro_raw);
+    if (!read_acc_burst(ACC_DATA_START, acc_raw) ||
+        !read_gyro_burst(GYRO_DATA_START, gyro_raw)) {
+        return false;
+    }
 
     int16_t raw_ax = static_cast<int16_t>((acc_raw[1]  << 8) | acc_raw[0]);
     int16_t raw_ay = static_cast<int16_t>((acc_raw[3]  << 8) | acc_raw[2]);

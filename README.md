@@ -5,14 +5,17 @@
 ## 架构
 
 ```
-┌─ component_container（同进程）─────────────────────┐
-│  ImuNode(200Hz) ─/imu/data_raw─▶ ImuPreprocessNode │
-└──────────────────────┬─────────────────────────────┘
-                       │ /imu/data_calibrated
-                       ▼
-            complementary_filter（独立进程）
-            ├─ /imu/data           姿态四元数
-            └─ /imu/rpy/filtered   欧拉角（debug）
+┌─ component_container（同进程）──────────────────────────────┐
+│  ImuNode (200Hz)                                            │
+│    SPI 读取 → 中值滤波(窗口3) → 陀螺仪零偏校准              │
+│    ├─ /imu/data_raw          原始数据（诊断用）              │
+│    └─ /imu/data_calibrated   滤波+校准后数据                │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ /imu/data_calibrated
+                               ▼
+                    complementary_filter（独立进程）
+                    ├─ /imu/data           姿态四元数
+                    └─ /imu/rpy/filtered   欧拉角（debug）
 ```
 
 ## Topic 接口
@@ -80,6 +83,41 @@ colcon build --packages-select imu_demo
 source install/setup.bash
 ros2 launch imu_demo imu.launch.py
 ```
+
+## 数据分析
+
+`scripts/analyze_static.py` 用于离线分析录制的静态 bag 数据，输出统计量和时域图表。
+
+**依赖（本地机器）：**
+```bash
+source /opt/ros/humble/setup.bash  # 提供 rosbag2_py、rclpy
+pip install matplotlib numpy       # 若未安装
+```
+
+**用法：**
+```bash
+# bag 放到 data/imu/raw/ 下后，在 ros2_ws 根目录执行
+python3 src/imu_demo/scripts/analyze_static.py data/imu/raw/<bag_name>
+
+# 自定义实验名称
+python3 src/imu_demo/scripts/analyze_static.py data/imu/raw/<bag_name> --name my_experiment
+```
+
+**输出目录** `data/imu/analysis/<timestamp>_<bag_name>/`：
+
+```
+├── plots/
+│   ├── gyro_raw.png          陀螺仪原始时域图
+│   ├── gyro_calibrated.png   陀螺仪校准后时域图
+│   ├── acc_raw.png           加速度计原始时域图
+│   ├── acc_calibrated.png    加速度计校准后时域图
+│   └── rpy_filtered.png      欧拉角时域图（Yaw 含线性拟合）
+├── summary.json              结构化统计量（零偏、噪声、漂移速率）
+├── summary.txt               终端输出副本
+└── command.txt               复现用的调用命令
+```
+
+完整采集和分析流程见 `data/imu/SOP.md`。
 
 ## 已知限制
 

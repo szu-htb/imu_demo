@@ -29,13 +29,13 @@ private:
 
     void cs_low(int cs_fd);
     void cs_high(int cs_fd);
-    void spi_transfer(const uint8_t* tx, uint8_t* rx, size_t len, int cs_fd);
+    bool spi_transfer(const uint8_t* tx, uint8_t* rx, size_t len, int cs_fd);
 
     void    write_register(uint8_t reg, uint8_t value, int cs_fd);
     uint8_t read_acc_register(uint8_t reg);
     uint8_t read_gyro_register(uint8_t reg);
-    void    read_acc_burst(uint8_t start_reg, uint8_t* data);
-    void    read_gyro_burst(uint8_t start_reg, uint8_t* data);
+    bool    read_acc_burst(uint8_t start_reg, uint8_t* data);
+    bool    read_gyro_burst(uint8_t start_reg, uint8_t* data);
 };
 
 #endif  // BMI088_DRIVER_HPP_

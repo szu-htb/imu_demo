@@ -15,11 +15,6 @@ def generate_launch_description():
                 plugin='ImuNode',
                 name='bmi088_node',
             ),
-            ComposableNode(
-                package='imu_demo',
-                plugin='ImuPreprocessNode',
-                name='imu_preprocess_node',
-            ),
         ],
         output='screen',
     )
