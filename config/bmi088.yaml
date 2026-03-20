@@ -1,0 +1,16 @@
+bmi088_node:
+  ros__parameters:
+    spi_device: "/dev/spidev1.0"
+    acc_cs_gpio: 394
+    gyro_cs_gpio: 396
+
+    publish_rate_hz: 200.0
+    frame_id: "imu_link"
+    calibration_duration_sec: 3.0
+
+    acc_range_g: 6
+    gyro_range_dps: 500
+    acc_odr_hz: 200
+    gyro_odr_hz: 200
+
+    spi_speed_hz: 5000000

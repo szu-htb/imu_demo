@@ -1,9 +1,18 @@
+import os
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import ComposableNodeContainer, Node
 from launch_ros.descriptions import ComposableNode
 
 
 def generate_launch_description():
+    config_file = os.path.join(
+        get_package_share_directory('imu_demo'),
+        'config',
+        'bmi088.yaml',
+    )
+
     container = ComposableNodeContainer(
         name='imu_container',
         namespace='',
@@ -14,6 +23,7 @@ def generate_launch_description():
                 package='imu_demo',
                 plugin='ImuNode',
                 name='bmi088_node',
+                parameters=[config_file],
             ),
         ],
         output='screen',

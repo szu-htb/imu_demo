@@ -13,6 +13,7 @@
   <depend>rclcpp_components</depend>
   <depend>sensor_msgs</depend>
 
+  <exec_depend>ament_index_python</exec_depend>
   <exec_depend>imu_complementary_filter</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
