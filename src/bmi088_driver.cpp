@@ -205,7 +205,7 @@ bool Bmi088Driver::initialize()
     usleep(1000);
 
     // Step 6：配置 GYRO
-    write_register(GYRO_RANGE,     0x00, gyro_cs_fd_);  // 0x00 = ±2000°/s
+    write_register(GYRO_RANGE,     0x02, gyro_cs_fd_);  // 0x00 = ±500°/s
     write_register(GYRO_BANDWIDTH, 0x02, gyro_cs_fd_);  // 1000Hz ODR，116Hz 滤波带宽
     usleep(1000);
 
@@ -235,7 +235,7 @@ bool Bmi088Driver::read_imu_data(ImuRawData& data)
 
     // 量程对应 initialize() 中的配置：±6g / ±2000°/s
     constexpr double ACC_SCALE  = (6.0 * 9.80665)         / 32768.0;
-    constexpr double GYRO_SCALE = (2000.0 * M_PI / 180.0) / 32768.0;
+    constexpr double GYRO_SCALE = (500.0 * M_PI / 180.0) / 32768.0;
 
     data.ax = raw_ax * ACC_SCALE;
     data.ay = raw_ay * ACC_SCALE;
