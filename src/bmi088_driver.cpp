@@ -26,6 +26,7 @@ static constexpr uint8_t  ACC_DATA_START   = 0x12;
 static constexpr uint8_t  GYRO_DATA_START  = 0x02;
 
 static constexpr uint32_t SPI_SPEED_HZ     = 5000000;  // BMI088 最高安全频率（规格书§6.1）
+static constexpr double   GRAVITY_MPS2     = 9.80665;
 
 // ---------------------------------------------------------
 // sysfs GPIO 工具函数
@@ -77,9 +78,119 @@ static int gpio_open_value(int gpio_num)
 // 构造 / 析构
 // ---------------------------------------------------------
 
-Bmi088Driver::Bmi088Driver(const std::string& spi_dev, int acc_gpio, int gyro_gpio)
-    : spi_fd_(-1), acc_cs_fd_(-1), gyro_cs_fd_(-1)
+Bmi088Driver::Bmi088Driver(const Bmi088Config& config)
+    : config_(config),
+      spi_fd_(-1),
+      acc_cs_fd_(-1),
+      gyro_cs_fd_(-1),
+      acc_range_reg_(0),
+      acc_conf_reg_(0),
+      gyro_range_reg_(0),
+      gyro_bandwidth_reg_(0),
+      acc_scale_(0.0),
+      gyro_scale_(0.0)
 {
+    if (config_.spi_speed_hz == 0 || config_.spi_speed_hz > SPI_SPEED_HZ) {
+        throw std::invalid_argument("spi_speed_hz must be in range 1.." + std::to_string(SPI_SPEED_HZ));
+    }
+
+    switch (config_.acc_range_g) {
+    case 3:
+        acc_range_reg_ = 0x00;
+        acc_scale_ = (3.0 * GRAVITY_MPS2) / 32768.0;
+        break;
+    case 6:
+        acc_range_reg_ = 0x01;
+        acc_scale_ = (6.0 * GRAVITY_MPS2) / 32768.0;
+        break;
+    case 12:
+        acc_range_reg_ = 0x02;
+        acc_scale_ = (12.0 * GRAVITY_MPS2) / 32768.0;
+        break;
+    case 24:
+        acc_range_reg_ = 0x03;
+        acc_scale_ = (24.0 * GRAVITY_MPS2) / 32768.0;
+        break;
+    default:
+        throw std::invalid_argument(
+            "Unsupported BMI088 acc_range_g: " + std::to_string(config_.acc_range_g));
+    }
+
+    // ACC_CONF 使用固定的 normal mode(OSR=normal/avg4)，对外只暴露 ODR 语义。
+    switch (config_.acc_odr_hz) {
+    case 100:
+        acc_conf_reg_ = 0xA8;
+        break;
+    case 200:
+        acc_conf_reg_ = 0xA9;
+        break;
+    case 400:
+        acc_conf_reg_ = 0xAA;
+        break;
+    case 800:
+        acc_conf_reg_ = 0xAB;
+        break;
+    case 1600:
+        acc_conf_reg_ = 0xAC;
+        break;
+    default:
+        throw std::invalid_argument(
+            "Unsupported BMI088 acc_odr_hz: " + std::to_string(config_.acc_odr_hz));
+    }
+
+    switch (config_.gyro_range_dps) {
+    case 2000:
+        gyro_range_reg_ = 0x00;
+        gyro_scale_ = (2000.0 * M_PI / 180.0) / 32768.0;
+        break;
+    case 1000:
+        gyro_range_reg_ = 0x01;
+        gyro_scale_ = (1000.0 * M_PI / 180.0) / 32768.0;
+        break;
+    case 500:
+        gyro_range_reg_ = 0x02;
+        gyro_scale_ = (500.0 * M_PI / 180.0) / 32768.0;
+        break;
+    case 250:
+        gyro_range_reg_ = 0x03;
+        gyro_scale_ = (250.0 * M_PI / 180.0) / 32768.0;
+        break;
+    case 125:
+        gyro_range_reg_ = 0x04;
+        gyro_scale_ = (125.0 * M_PI / 180.0) / 32768.0;
+        break;
+    default:
+        throw std::invalid_argument(
+            "Unsupported BMI088 gyro_range_dps: " + std::to_string(config_.gyro_range_dps));
+    }
+
+    // GYRO_BANDWIDTH 寄存器同时编码 ODR 和滤波带宽。这里对外只暴露 ODR，
+    // 并为每个 ODR 选用一组固定的高响应 profile。
+    switch (config_.gyro_odr_hz) {
+    case 100:
+        gyro_bandwidth_reg_ = 0x07;
+        break;
+    case 200:
+        gyro_bandwidth_reg_ = 0x06;
+        break;
+    case 400:
+        gyro_bandwidth_reg_ = 0x03;
+        break;
+    case 1000:
+        gyro_bandwidth_reg_ = 0x02;
+        break;
+    case 2000:
+        gyro_bandwidth_reg_ = 0x00;
+        break;
+    default:
+        throw std::invalid_argument(
+            "Unsupported BMI088 gyro_odr_hz: " + std::to_string(config_.gyro_odr_hz));
+    }
+
+    int acc_gpio  = config_.acc_cs_gpio;
+    int gyro_gpio = config_.gyro_cs_gpio;
+    const std::string& spi_dev = config_.spi_device;
+
     gpio_export(acc_gpio);
     gpio_export(gyro_gpio);
     gpio_set_direction(acc_gpio,  "out");
@@ -95,7 +206,7 @@ Bmi088Driver::Bmi088Driver(const std::string& spi_dev, int acc_gpio, int gyro_gp
     // SPI_NO_CS：禁用内核硬件 CS，改由 sysfs GPIO 手动控制
     // 原因：同一控制器同时持有多个 spidev fd 时，硬件 CS 会导致 ioctl 数据全零
     uint32_t mode  = SPI_MODE_0 | SPI_NO_CS;
-    uint32_t speed = SPI_SPEED_HZ;
+    uint32_t speed = config_.spi_speed_hz;
     ioctl(spi_fd_, SPI_IOC_WR_MODE32,       &mode);
     ioctl(spi_fd_, SPI_IOC_WR_MAX_SPEED_HZ, &speed);
 }
@@ -128,7 +239,7 @@ bool Bmi088Driver::spi_transfer(const uint8_t* tx, uint8_t* rx, size_t len, int 
     tr.tx_buf   = (unsigned long)tx;
     tr.rx_buf   = (unsigned long)rx;
     tr.len      = len;
-    tr.speed_hz = SPI_SPEED_HZ;
+    tr.speed_hz = config_.spi_speed_hz;
     cs_low(cs_fd);
     int ret = ioctl(spi_fd_, SPI_IOC_MESSAGE(1), &tr);
     cs_high(cs_fd);
@@ -200,13 +311,13 @@ bool Bmi088Driver::initialize()
     }
 
     // Step 5：配置 ACC
-    write_register(ACC_RANGE, 0x01, acc_cs_fd_);  // 0x01 = ±6g
-    write_register(ACC_CONF,  0xA9, acc_cs_fd_);  // 性能模式 | 正常过采样 | 200Hz ODR
+    write_register(ACC_RANGE, acc_range_reg_, acc_cs_fd_);
+    write_register(ACC_CONF,  acc_conf_reg_,  acc_cs_fd_);
     usleep(1000);
 
     // Step 6：配置 GYRO
-    write_register(GYRO_RANGE,     0x02, gyro_cs_fd_);  // 0x00 = ±500°/s
-    write_register(GYRO_BANDWIDTH, 0x02, gyro_cs_fd_);  // 1000Hz ODR，116Hz 滤波带宽
+    write_register(GYRO_RANGE,     gyro_range_reg_,     gyro_cs_fd_);
+    write_register(GYRO_BANDWIDTH, gyro_bandwidth_reg_, gyro_cs_fd_);
     usleep(1000);
 
     return true;
@@ -233,16 +344,12 @@ bool Bmi088Driver::read_imu_data(ImuRawData& data)
     int16_t raw_gy = static_cast<int16_t>((gyro_raw[3] << 8) | gyro_raw[2]);
     int16_t raw_gz = static_cast<int16_t>((gyro_raw[5] << 8) | gyro_raw[4]);
 
-    // 量程对应 initialize() 中的配置：±6g / ±2000°/s
-    constexpr double ACC_SCALE  = (6.0 * 9.80665)         / 32768.0;
-    constexpr double GYRO_SCALE = (500.0 * M_PI / 180.0) / 32768.0;
-
-    data.ax = raw_ax * ACC_SCALE;
-    data.ay = raw_ay * ACC_SCALE;
-    data.az = raw_az * ACC_SCALE;
-    data.gx = raw_gx * GYRO_SCALE;
-    data.gy = raw_gy * GYRO_SCALE;
-    data.gz = raw_gz * GYRO_SCALE;
+    data.ax = raw_ax * acc_scale_;
+    data.ay = raw_ay * acc_scale_;
+    data.az = raw_az * acc_scale_;
+    data.gx = raw_gx * gyro_scale_;
+    data.gy = raw_gy * gyro_scale_;
+    data.gz = raw_gz * gyro_scale_;
 
     return true;
 }

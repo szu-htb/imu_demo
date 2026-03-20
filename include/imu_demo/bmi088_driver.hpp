@@ -4,6 +4,21 @@
 #include <string>
 #include <cstdint>
 
+struct Bmi088Config {
+    // Hardware
+    std::string spi_device = "/dev/spidev1.0";
+    int acc_cs_gpio = 394;
+    int gyro_cs_gpio = 396;
+
+    // Sensor settings
+    int acc_range_g = 6;
+    int gyro_range_dps = 500;
+    int acc_odr_hz = 200;
+    int gyro_odr_hz = 200;
+
+    uint32_t spi_speed_hz = 5000000;
+};
+
 struct ImuRawData {
     double ax, ay, az;  // m/s²
     double gx, gy, gz;  // rad/s
@@ -16,16 +31,23 @@ public:
      * @param acc_gpio  ACC 片选的 Linux GPIO 编号（Physical 24 = 394）
      * @param gyro_gpio GYRO 片选的 Linux GPIO 编号（Physical 26 = 396）
      */
-    Bmi088Driver(const std::string& spi_dev, int acc_gpio, int gyro_gpio);
+    explicit Bmi088Driver(const Bmi088Config& config);
     ~Bmi088Driver();
 
     bool initialize();
     bool read_imu_data(ImuRawData& data);
 
 private:
+    Bmi088Config config_;
     int spi_fd_;
     int acc_cs_fd_;
     int gyro_cs_fd_;
+    uint8_t acc_range_reg_;
+    uint8_t acc_conf_reg_;
+    uint8_t gyro_range_reg_;
+    uint8_t gyro_bandwidth_reg_;
+    double acc_scale_;
+    double gyro_scale_;
 
     void cs_low(int cs_fd);
     void cs_high(int cs_fd);
