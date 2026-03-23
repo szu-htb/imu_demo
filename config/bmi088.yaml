@@ -1,5 +1,7 @@
 bmi088_node:
   ros__parameters:
+    bus_type: "spi"
+
     spi_device: "/dev/spidev1.0"
     acc_cs_gpio: 394
     gyro_cs_gpio: 396

@@ -1,0 +1,62 @@
+---
+Language: Cpp
+BasedOnStyle: Google
+
+# 缩进
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -4
+ConstructorInitializerIndentWidth: 4
+ContinuationIndentWidth: 4
+
+# 行宽
+ColumnLimit: 120
+
+# 大括号：函数/类定义换行，控制流不换行
+BreakBeforeBraces: Stroustrup
+
+# 指针/引用靠左：`int& x`，不是 `int &x`
+PointerAlignment: Left
+
+# 控制语句前留空格：`if (`, `for (`, `while (`
+SpaceBeforeParens: ControlStatements
+
+# 不在空括号内加空格
+SpaceInEmptyParentheses: false
+
+# 连续赋值对齐关闭，避免 git diff 噪音
+AlignConsecutiveAssignments: false
+AlignConsecutiveMacros: false
+AlignConsecutiveDeclarations: false
+
+# 尾部注释对齐
+AlignTrailingComments: true
+
+# 包含文件排序与分组
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^"imu_demo/'
+    Priority: 1
+  - Regex: '^<rclcpp'
+    Priority: 2
+  - Regex: '^<(sensor_msgs|geometry_msgs|std_msgs)'
+    Priority: 3
+  - Regex: '^<(fcntl|unistd|sys/|linux/)'
+    Priority: 4
+  - Regex: '^<'
+    Priority: 5
+
+# 允许短内联函数单行（getter 等）
+AllowShortFunctionsOnASingleLine: Inline
+
+# 不允许 if/loop 压缩成单行
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+# 函数参数换行策略：要么全在一行，要么每个单独一行
+BinPackArguments: false
+BinPackParameters: false
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true

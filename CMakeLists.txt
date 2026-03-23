@@ -14,6 +14,7 @@ find_package(rclcpp_components REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
 add_library(imu_components SHARED
+  src/spi_bus.cpp
   src/bmi088_driver.cpp
   src/imu_node.cpp
 )
