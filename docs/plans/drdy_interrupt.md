@@ -81,3 +81,7 @@
 - 参考文档：https://developer.d-robotics.cc/rdk_doc/Advanced_development/linux_development/driver_development_x5/driver_gpio_dev
 - 中断机制和总线类型正交，无论 SPI 还是 I2C，INT 引脚连接方式不变
 - 时间戳误差分析：当前随机 0~6ms → 中断后固定 ~30μs（中断延迟 + SPI 传输），固定偏移可标定补偿
+
+## 后续计划
+P0: 增加上自检流程
+P1: 硬件滤波流程
