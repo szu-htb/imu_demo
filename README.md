@@ -47,7 +47,7 @@
 | `spi_device` | SPI 设备节点 | `/dev/spidev1.0` |
 | `acc_cs_gpio` | ACC 片选 GPIO 编号 | `394` |
 | `gyro_cs_gpio` | GYRO 片选 GPIO 编号 | `396` |
-| `publish_rate_hz` | 节点发布频率 | `200.0` |
+| `publish_rate_hz` | 节点发布频率 | `200` |
 | `frame_id` | IMU 消息的 `frame_id` | `imu_link` |
 | `calibration_duration_sec` | 启动时陀螺仪零偏校准时长 | `3.0` |
 | `acc_range_g` | 加速度计量程，语义值 | `6` |

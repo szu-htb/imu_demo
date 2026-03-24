@@ -3,47 +3,21 @@
 #include <rclcpp_components/register_node_macro.hpp>
 
 #include <algorithm>
+#include <chrono>
 
 ImuNode::ImuNode(const rclcpp::NodeOptions& options) : Node("bmi088_node", options)
 {
-    raw_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("imu/data_raw", rclcpp::SensorDataQoS());
-    cal_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("imu/data_calibrated", rclcpp::SensorDataQoS().reliable());
-
     const Bmi088Config driver_config = load_driver_config();
     node_config_ = load_node_config();
     validate_configs(driver_config, node_config_);
 
-    calibration_target_samples_ =
-        std::max<size_t>(1, static_cast<size_t>(node_config_.calibration_duration_sec * node_config_.publish_rate_hz));
-
-    const auto period_ns = std::chrono::nanoseconds(static_cast<int64_t>(1e9 / node_config_.publish_rate_hz));
-
-    RCLCPP_INFO(this->get_logger(),
-                "BMI088 config: spi=%s, acc_cs=%d, gyro_cs=%d, spi_speed=%u Hz",
-                driver_config.spi_device.c_str(),
-                driver_config.acc_cs_gpio,
-                driver_config.gyro_cs_gpio,
-                driver_config.spi_speed_hz);
-
-    RCLCPP_INFO(this->get_logger(),
-                "Sensor config: acc_range=%d g, gyro_range=%d dps, acc_odr=%d Hz, gyro_odr=%d Hz",
-                driver_config.acc_range_g,
-                driver_config.gyro_range_dps,
-                driver_config.acc_odr_hz,
-                driver_config.gyro_odr_hz);
-
-    RCLCPP_INFO(this->get_logger(),
-                "Node config: frame_id=%s, publish_rate=%.2f Hz, period=%.3f ms, calibration=%.2f s (%zu samples)",
-                node_config_.frame_id.c_str(),
-                node_config_.publish_rate_hz,
-                static_cast<double>(period_ns.count()) / 1e6,
-                node_config_.calibration_duration_sec,
-                calibration_target_samples_);
-
+    // todo: 根据yaml的配置动态选择通信接口（SPI/I2C），目前只实现了SPI -->
+    // 考虑抽象为一个初始化通信接口的函数，采用工厂模式封装接口，Node层零改动
     try {
-        driver_ = std::make_unique<Bmi088Driver>(driver_config);
+        driver_ = std::make_unique<Bmi088Driver>(
+            driver_config, [this](const std::string& msg) { RCLCPP_INFO(this->get_logger(), "%s", msg.c_str()); });
         if (!driver_->initialize()) {
-            RCLCPP_ERROR(this->get_logger(), "BMI088 Chip ID mismatch! Check wiring.");
+            RCLCPP_ERROR(this->get_logger(), "BMI088 initialization failed.");
             return;
         }
         RCLCPP_INFO(this->get_logger(), "BMI088 driver initialized successfully.");
@@ -54,15 +28,18 @@ ImuNode::ImuNode(const rclcpp::NodeOptions& options) : Node("bmi088_node", optio
     }
 
     // 缓存 clock 指针，避免热路径每帧原子引用计数
-    clock_ = this->get_clock();
+    this->clock_ = this->get_clock();
 
     // 不变字段初始化一次，热路径只更新 stamp 和数据
-    raw_msg_.header.frame_id = node_config_.frame_id;
-    raw_msg_.orientation_covariance[0] = -1.0;
-    cal_msg_.header.frame_id = node_config_.frame_id;
-    cal_msg_.orientation_covariance[0] = -1.0;
+    msg_.header.frame_id = node_config_.frame_id;
+    msg_.orientation_covariance[0] = -1.0;
 
-    timer_ = this->create_wall_timer(period_ns, std::bind(&ImuNode::timer_callback, this));
+    this->pub_ =
+        this->create_publisher<sensor_msgs::msg::Imu>("imu/data_calibrated", rclcpp::SensorDataQoS().reliable());
+    RCLCPP_INFO(this->get_logger(), "IMU Rate: %dHz", node_config_.publish_rate_hz);
+
+    this->poll_timer_ = this->create_wall_timer(std::chrono::milliseconds((1000 / node_config_.publish_rate_hz)),
+                                                std::bind(&ImuNode::timer_callback, this));
 }
 
 double ImuNode::median3(double a, double b, double c)
@@ -103,70 +80,65 @@ void ImuNode::timer_callback()
         return;
     }
 
-    raw_msg_.header.stamp = clock_->now();
-    raw_msg_.linear_acceleration.x = raw.ax;
-    raw_msg_.linear_acceleration.y = raw.ay;
-    raw_msg_.linear_acceleration.z = raw.az;
-    raw_msg_.angular_velocity.x = raw.gx;
-    raw_msg_.angular_velocity.y = raw.gy;
-    raw_msg_.angular_velocity.z = raw.gz;
-    raw_pub_->publish(raw_msg_);
-
     ImuRawData filtered = apply_median_filter(raw);
 
-    if (!calibrated_) {
-        gyro_bias_x_ += filtered.gx;
-        gyro_bias_y_ += filtered.gy;
-        gyro_bias_z_ += filtered.gz;
-        ++cal_count_;
-
-        if (cal_count_ >= calibration_target_samples_) {
-            gyro_bias_x_ /= static_cast<double>(cal_count_);
-            gyro_bias_y_ /= static_cast<double>(cal_count_);
-            gyro_bias_z_ /= static_cast<double>(cal_count_);
-            calibrated_ = true;
-            RCLCPP_INFO(this->get_logger(),
-                        "Gyro calibration done with %zu samples. Bias: [%.6f, %.6f, %.6f] rad/s",
-                        cal_count_,
-                        gyro_bias_x_,
-                        gyro_bias_y_,
-                        gyro_bias_z_);
-        }
-        return;
-    }
-
-    cal_msg_.header.stamp = raw_msg_.header.stamp;
-    cal_msg_.linear_acceleration.x = filtered.ax;
-    cal_msg_.linear_acceleration.y = filtered.ay;
-    cal_msg_.linear_acceleration.z = filtered.az;
-    cal_msg_.angular_velocity.x = filtered.gx - gyro_bias_x_;
-    cal_msg_.angular_velocity.y = filtered.gy - gyro_bias_y_;
-    cal_msg_.angular_velocity.z = filtered.gz - gyro_bias_z_;
-    cal_pub_->publish(cal_msg_);
+    msg_.header.stamp = clock_->now();
+    msg_.linear_acceleration.x = filtered.ax;
+    msg_.linear_acceleration.y = filtered.ay;
+    msg_.linear_acceleration.z = filtered.az;
+    msg_.angular_velocity.x = filtered.gx;
+    msg_.angular_velocity.y = filtered.gy;
+    msg_.angular_velocity.z = filtered.gz;
+    pub_->publish(msg_);
 }
 
 Bmi088Config ImuNode::load_driver_config()
 {
     Bmi088Config config;
     config.bus_type = this->declare_parameter<std::string>("bus_type", config.bus_type);
-    config.spi_device = this->declare_parameter<std::string>("spi_device", config.spi_device);
-    config.acc_cs_gpio = this->declare_parameter<int>("acc_cs_gpio", config.acc_cs_gpio);
-    config.gyro_cs_gpio = this->declare_parameter<int>("gyro_cs_gpio", config.gyro_cs_gpio);
+    if (config.bus_type == "spi") {
+        config.spi_device = this->declare_parameter<std::string>("spi_device", config.spi_device);
+        config.acc_cs_gpio = this->declare_parameter<int>("acc_cs_gpio", config.acc_cs_gpio);
+        config.gyro_cs_gpio = this->declare_parameter<int>("gyro_cs_gpio", config.gyro_cs_gpio);
+        config.spi_speed_hz = this->declare_parameter<int>("spi_speed_hz", static_cast<int>(config.spi_speed_hz));
+
+        RCLCPP_INFO(this->get_logger(),
+                    "BMI088 config: spi=%s, acc_cs=%d, gyro_cs=%d, spi_speed=%u Hz",
+                    config.spi_device.c_str(),
+                    config.acc_cs_gpio,
+                    config.gyro_cs_gpio,
+                    config.spi_speed_hz);
+    }
+
     config.acc_range_g = this->declare_parameter<int>("acc_range_g", config.acc_range_g);
     config.gyro_range_dps = this->declare_parameter<int>("gyro_range_dps", config.gyro_range_dps);
     config.acc_odr_hz = this->declare_parameter<int>("acc_odr_hz", config.acc_odr_hz);
     config.gyro_odr_hz = this->declare_parameter<int>("gyro_odr_hz", config.gyro_odr_hz);
-    config.spi_speed_hz = this->declare_parameter<int>("spi_speed_hz", static_cast<int>(config.spi_speed_hz));
+
+    RCLCPP_INFO(this->get_logger(),
+                "Sensor config: acc_range=%d g, gyro_range=%d dps, acc_odr=%d Hz, gyro_odr=%d Hz",
+                config.acc_range_g,
+                config.gyro_range_dps,
+                config.acc_odr_hz,
+                config.gyro_odr_hz);
+
+    config.enable_self_test = this->declare_parameter<bool>("enable_self_test", config.enable_self_test);
+    RCLCPP_INFO(this->get_logger(), "Self-test: %s", config.enable_self_test ? "enabled" : "disabled");
+
     return config;
 }
 
 ImuNodeConfig ImuNode::load_node_config()
 {
     ImuNodeConfig config;
-    config.publish_rate_hz = this->declare_parameter<double>("publish_rate_hz", config.publish_rate_hz);
+    config.publish_rate_hz = this->declare_parameter<int>("publish_rate_hz", config.publish_rate_hz);
     config.frame_id = this->declare_parameter<std::string>("frame_id", config.frame_id);
-    config.calibration_duration_sec =
-        this->declare_parameter<double>("calibration_duration_sec", config.calibration_duration_sec);
+
+    RCLCPP_INFO(this->get_logger(),
+                "Node config: frame_id=%s, publish_rate=%d Hz",
+                config.frame_id.c_str(),
+                config.publish_rate_hz);
+
     return config;
 }
 
@@ -175,11 +147,8 @@ void ImuNode::validate_configs(const Bmi088Config& driver_config, const ImuNodeC
     if (driver_config.acc_cs_gpio < 0 || driver_config.gyro_cs_gpio < 0) {
         throw std::runtime_error("GPIO number must be non-negative");
     }
-    if (node_config.publish_rate_hz <= 0.0) {
+    if (node_config.publish_rate_hz <= 0) {
         throw std::runtime_error("publish_rate_hz must be > 0");
-    }
-    if (node_config.calibration_duration_sec <= 0.0) {
-        throw std::runtime_error("calibration_duration_sec must be > 0");
     }
 }
 
