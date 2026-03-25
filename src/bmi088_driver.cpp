@@ -1,7 +1,7 @@
 #include "imu_demo/bmi088_driver.hpp"
 
 #include "imu_demo/bmi088_registers.hpp"
-#include "imu_demo/spi_bus.hpp"
+#include "imu_demo/spi_bus.hpp"  // SpiDevice 完整定义
 
 #include <unistd.h>
 
@@ -14,6 +14,9 @@
 namespace acc = bmi088_regs::acc;
 namespace gyro = bmi088_regs::gyro;
 
+// SpiDevice 完整类型在此可见，unique_ptr<SpiDevice> 可正确析构
+Bmi088Driver::~Bmi088Driver() = default;
+
 static constexpr double GRAVITY_MPS2 = 9.80665;
 
 // ---------------------------------------------------------
@@ -22,10 +25,11 @@ static constexpr double GRAVITY_MPS2 = 9.80665;
 Bmi088Driver::Bmi088Driver(const Bmi088Config& config, LogCallback log) : config_(config), log_(std::move(log))
 {
     if (config_.bus_type == "spi") {
+        spi_device_ = std::make_unique<SpiDevice>(config_.spi_device, config_.spi_speed_hz);
         acc_bus_ = std::make_unique<SpiBusInterface>(
-            config_.spi_device, config_.acc_cs_gpio, config_.spi_speed_hz, /*has_dummy_byte=*/true);
+            *spi_device_, config_.acc_cs_gpio, config_.spi_speed_hz, /*has_dummy_byte=*/true);
         gyro_bus_ = std::make_unique<SpiBusInterface>(
-            config_.spi_device, config_.gyro_cs_gpio, config_.spi_speed_hz, /*has_dummy_byte=*/false);
+            *spi_device_, config_.gyro_cs_gpio, config_.spi_speed_hz, /*has_dummy_byte=*/false);
     }
     else {
         throw std::invalid_argument("Unsupported bus_type: " + config_.bus_type);

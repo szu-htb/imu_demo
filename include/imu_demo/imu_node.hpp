@@ -25,6 +25,7 @@ private:
     void validate_configs(const Bmi088Config& driver_config, const ImuNodeConfig& node_config);
 
     void timer_callback();
+    void publish_sample(const ImuRawData& raw);
 
     static double median3(double a, double b, double c);
     ImuRawData apply_median_filter(const ImuRawData& data);

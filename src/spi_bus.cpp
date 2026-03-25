@@ -60,26 +60,39 @@ static int gpio_open_value(int gpio_num)
 }
 
 // ---------------------------------------------------------
+// SpiDevice
+// ---------------------------------------------------------
+
+SpiDevice::SpiDevice(const std::string& device, uint32_t speed_hz)
+{
+    fd_ = open(device.c_str(), O_RDWR);
+    if (fd_ < 0)
+        throw std::runtime_error("Failed to open SPI device: " + device);
+
+    // SPI_NO_CS：禁用内核硬件 CS，改由 sysfs GPIO 手动控制
+    // 原因：同一控制器同时持有多个 spidev fd 时，硬件 CS 会导致 ioctl 数据全零
+    uint32_t mode = SPI_MODE_0 | SPI_NO_CS;
+    ioctl(fd_, SPI_IOC_WR_MODE32, &mode);
+    ioctl(fd_, SPI_IOC_WR_MAX_SPEED_HZ, &speed_hz);
+}
+
+SpiDevice::~SpiDevice()
+{
+    if (fd_ >= 0)
+        close(fd_);
+}
+
+// ---------------------------------------------------------
 // SpiBusInterface
 // ---------------------------------------------------------
 
-SpiBusInterface::SpiBusInterface(const std::string& spi_device, int cs_gpio, uint32_t speed_hz, bool has_dummy_byte)
-    : spi_fd_(-1), cs_fd_(-1), speed_hz_(speed_hz), has_dummy_byte_(has_dummy_byte)
+SpiBusInterface::SpiBusInterface(const SpiDevice& spi, int cs_gpio, uint32_t speed_hz, bool has_dummy_byte)
+    : spi_fd_(spi.fd()), cs_fd_(-1), speed_hz_(speed_hz), has_dummy_byte_(has_dummy_byte)
 {
     gpio_export(cs_gpio);
     gpio_set_direction(cs_gpio, "out");
     cs_fd_ = gpio_open_value(cs_gpio);
     cs_high();
-
-    spi_fd_ = open(spi_device.c_str(), O_RDWR);
-    if (spi_fd_ < 0)
-        throw std::runtime_error("Failed to open SPI device: " + spi_device);
-
-    // SPI_NO_CS：禁用内核硬件 CS，改由 sysfs GPIO 手动控制
-    // 原因：同一控制器同时持有多个 spidev fd 时，硬件 CS 会导致 ioctl 数据全零
-    uint32_t mode = SPI_MODE_0 | SPI_NO_CS;
-    ioctl(spi_fd_, SPI_IOC_WR_MODE32, &mode);
-    ioctl(spi_fd_, SPI_IOC_WR_MAX_SPEED_HZ, &speed_hz_);
 }
 
 SpiBusInterface::~SpiBusInterface()
@@ -88,8 +101,6 @@ SpiBusInterface::~SpiBusInterface()
         cs_high();
         close(cs_fd_);
     }
-    if (spi_fd_ >= 0)
-        close(spi_fd_);
 }
 
 void SpiBusInterface::cs_low()

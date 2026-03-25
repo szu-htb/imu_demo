@@ -28,7 +28,6 @@ constexpr uint8_t BANDWIDTH = 0x10;
 constexpr uint8_t LPM1 = 0x11;
 constexpr uint8_t SELF_TEST = 0x3C;
 constexpr uint8_t SOFT_RESET = 0x14;
-
 constexpr uint8_t CHIP_ID_VALUE = 0x0F;
 }  // namespace gyro
 

@@ -44,25 +44,26 @@
 
 ## 实现步骤
 
-### Step 1：抽象总线接口（IBusInterface）
-- [ ] 新增 `include/imu_demo/bus_interface.hpp`，定义 `IBusInterface` 纯虚接口
-- [ ] 接口方法：`write_reg()`、`read_reg()`、`read_burst()`
-- [ ] 新增 `SpiBusInterface`，将现有 `Bmi088Driver` 中的 SPI 细节迁移进去
-- [ ] `Bmi088Driver` 改为持有 `IBusInterface`，不再直接操作 SPI/GPIO
+### Step 1：抽象总线接口（IBusInterface）✅
+- [x] 新增 `include/imu_demo/bus_interface.hpp`，定义 `IBusInterface` 纯虚接口
+- [x] 接口方法：`write_reg()`、`read_reg()`、`read_burst()`
+- [x] 新增 `SpiBusInterface`，将现有 `Bmi088Driver` 中的 SPI 细节迁移进去
+- [x] `Bmi088Driver` 改为持有 `IBusInterface`，不再直接操作 SPI/GPIO
 
-### Step 2：抽象中断接口（IDataReadyInterface）
-- [ ] 新增 `include/imu_demo/drdy_interface.hpp`，定义 `IDataReadyInterface`
-- [ ] 接口方法：`wait_drdy(int timeout_ms) -> bool`
-- [ ] 实现 `SysfsGpioDrdy`：export GPIO → 配置 edge=rising → poll()
+### Step 2：抽象中断接口（IDataReadyInterface）✅
+- [x] 新增 `include/imu_demo/drdy_interface.hpp`，定义 `IDataReadyInterface`
+- [x] 接口方法：`wait_drdy(int timeout_ms) -> bool`
+- [x] 实现 `SysfsGpioDrdy`：export GPIO → 配置 edge=rising → poll()
 
-### Step 3：配置 BMI088 INT 寄存器
-- [ ] 在 `Bmi088Driver::initialize()` 中写入上表三个寄存器
-- [ ] `Bmi088Config` 增加 `gyro_int_gpio` 字段（默认 423）
-- [ ] `config/bmi088.yaml` 增加对应配置项
+### Step 3：配置 BMI088 INT 寄存器 ✅
+- [x] `Bmi088Config` 增加 `bool use_drdy = false` + `int gyro_int_gpio = 423`
+- [x] 在 `Bmi088Driver::configure_sensors()` 中，仅当 `use_drdy=true` 时写入上表三个寄存器
+- [x] `config/bmi088.yaml` 增加 `use_drdy: false` 和 `gyro_int_gpio: 423`
 
-### Step 4：替换 sampling_loop() 定时方式
-- [ ] `ImuNode` 持有 `IDataReadyInterface`
-- [ ] `sampling_loop()` 将 `sleep_until` 替换为 `drdy_->wait_drdy(10)`
+### Step 4：ImuNode 根据 use_drdy 选择采样路径 ✅
+- [x] `ImuNode` 构造时读取 `use_drdy` 参数
+- [x] `use_drdy=false`：沿用现有 `wall_timer`，无改动
+- [x] `use_drdy=true`：创建 `SysfsGpioDrdy`，用独立线程 + `wait_drdy(10)` 替代 timer
 
 ### Step 5：验证
 - [ ] 录制 30s 数据，跑 `analyze_static.py` 对比时序直方图

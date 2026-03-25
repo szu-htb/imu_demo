@@ -11,8 +11,6 @@ ImuNode::ImuNode(const rclcpp::NodeOptions& options) : Node("bmi088_node", optio
     node_config_ = load_node_config();
     validate_configs(driver_config, node_config_);
 
-    // todo: 根据yaml的配置动态选择通信接口（SPI/I2C），目前只实现了SPI -->
-    // 考虑抽象为一个初始化通信接口的函数，采用工厂模式封装接口，Node层零改动
     try {
         driver_ = std::make_unique<Bmi088Driver>(
             driver_config, [this](const std::string& msg) { RCLCPP_INFO(this->get_logger(), "%s", msg.c_str()); });
@@ -36,8 +34,8 @@ ImuNode::ImuNode(const rclcpp::NodeOptions& options) : Node("bmi088_node", optio
 
     this->pub_ =
         this->create_publisher<sensor_msgs::msg::Imu>("imu/data_calibrated", rclcpp::SensorDataQoS().reliable());
-    RCLCPP_INFO(this->get_logger(), "IMU Rate: %dHz", node_config_.publish_rate_hz);
 
+    RCLCPP_INFO(this->get_logger(), "Timer mode: %dHz", node_config_.publish_rate_hz);
     this->poll_timer_ = this->create_wall_timer(std::chrono::milliseconds((1000 / node_config_.publish_rate_hz)),
                                                 std::bind(&ImuNode::timer_callback, this));
 }
@@ -73,15 +71,9 @@ ImuRawData ImuNode::apply_median_filter(const ImuRawData& data)
     return out;
 }
 
-void ImuNode::timer_callback()
+void ImuNode::publish_sample(const ImuRawData& raw)
 {
-    ImuRawData raw;
-    if (!driver_->read_imu_data(raw)) {
-        return;
-    }
-
     ImuRawData filtered = apply_median_filter(raw);
-
     msg_.header.stamp = clock_->now();
     msg_.linear_acceleration.x = filtered.ax;
     msg_.linear_acceleration.y = filtered.ay;
@@ -90,6 +82,15 @@ void ImuNode::timer_callback()
     msg_.angular_velocity.y = filtered.gy;
     msg_.angular_velocity.z = filtered.gz;
     pub_->publish(msg_);
+}
+
+void ImuNode::timer_callback()
+{
+    ImuRawData raw;
+    if (!driver_->read_imu_data(raw)) {
+        return;
+    }
+    publish_sample(raw);
 }
 
 Bmi088Config ImuNode::load_driver_config()

@@ -8,6 +8,8 @@
 #include <memory>
 #include <string>
 
+class SpiDevice;  // 前向声明，完整定义在 spi_bus.hpp（仅 .cpp 引入）
+
 struct Bmi088Config {
     // 通信层选择：通过 bus_type 在运行时切换，上层代码零改动
     std::string bus_type = "spi";  // "spi" | "i2c"
@@ -42,6 +44,7 @@ public:
 
     explicit Bmi088Driver(
         const Bmi088Config& config, LogCallback log = [](const std::string&) {});
+    ~Bmi088Driver();  // 定义在 .cpp，SpiDevice 完整类型在 .cpp 可见
 
     bool initialize();
     bool read_imu_data(ImuRawData& data);
@@ -60,6 +63,9 @@ private:
     Bmi088Config config_;
     LogCallback log_;
 
+    // spi_device_ 必须在 acc_bus_/gyro_bus_ 之前声明：
+    // 成员析构逆序，确保两个总线实例先析构，再销毁 SpiDevice（关闭 fd）
+    std::unique_ptr<SpiDevice> spi_device_;
     std::unique_ptr<IBusInterface> acc_bus_;
     std::unique_ptr<IBusInterface> gyro_bus_;
 
