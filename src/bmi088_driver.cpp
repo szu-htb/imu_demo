@@ -5,6 +5,7 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -18,6 +19,9 @@ namespace gyro = bmi088_regs::gyro;
 Bmi088Driver::~Bmi088Driver() = default;
 
 static constexpr double GRAVITY_MPS2 = 9.80665;
+static constexpr size_t GYRO_FIFO_FRAME_SIZE = 6;
+static constexpr uint8_t GYRO_FIFO_STREAM_XYZ = 0x80;
+static constexpr uint8_t GYRO_FIFO_WATERMARK_DISABLED = 0x00;
 
 // ---------------------------------------------------------
 // 构造：根据 bus_type 创建对应的总线实现
@@ -309,6 +313,15 @@ void Bmi088Driver::configure_sensors()
     usleep(1000);
 }
 
+void Bmi088Driver::configure_fifo()
+{
+    gyro_bus_->write_reg(gyro::FIFO_EXT_INT_S, 0x00);
+    // 先写 FIFO_CONF_0 再写 FIFO_CONF_1，让最终配置写同时清空 FIFO 和 overrun 状态。
+    gyro_bus_->write_reg(gyro::FIFO_CONF_0, GYRO_FIFO_WATERMARK_DISABLED);
+    gyro_bus_->write_reg(gyro::FIFO_CONF_1, GYRO_FIFO_STREAM_XYZ);
+    log_("GYRO FIFO configured: stream mode, XYZ, tag off");
+}
+
 // ---------------------------------------------------------
 // calibrate_gyro：阻塞式陀螺仪零偏校准
 // 读取 N 个样本取均值，结果存入 gyro_bias_x/y/z_
@@ -361,6 +374,7 @@ void Bmi088Driver::calibrate_gyro()
 //   阶段1：自检（可选）→ soft reset → 重新 boot
 //   阶段2：configure_sensors（用户量程/ODR）
 //   阶段3：calibrate_gyro（零偏校准）
+//   阶段4：configure_fifo（可选，校准后启用以清掉启动阶段积累的旧样本）
 // ---------------------------------------------------------
 bool Bmi088Driver::initialize()
 {
@@ -375,6 +389,49 @@ bool Bmi088Driver::initialize()
 
     configure_sensors();
     calibrate_gyro();
+
+    if (config_.use_gyro_fifo) {
+        configure_fifo();
+    }
+
+    return true;
+}
+
+bool Bmi088Driver::read_imu_fifo_data(ImuRawData* data, size_t capacity, FifoReadResult& result)
+{
+    result = {};
+    if (data == nullptr || capacity == 0) {
+        return false;
+    }
+
+    size_t frame_count = 0;
+    if (!read_gyro_fifo_status(frame_count, result.overrun)) {
+        return false;
+    }
+
+    if (frame_count == 0) {
+        return true;
+    }
+
+    const size_t samples_to_read = std::min(std::min(frame_count, capacity), Bmi088Driver::kGyroFifoMaxFrames);
+    const size_t bytes_to_read = samples_to_read * GYRO_FIFO_FRAME_SIZE;
+    uint8_t raw_fifo[Bmi088Driver::kGyroFifoMaxFrames * GYRO_FIFO_FRAME_SIZE] = {};
+
+    ImuRawData acc_snapshot = {};
+    if (!read_acc_data(acc_snapshot)) {
+        return false;
+    }
+
+    if (!gyro_bus_->read_burst(gyro::FIFO_DATA, raw_fifo, bytes_to_read)) {
+        return false;
+    }
+
+    for (size_t i = 0; i < samples_to_read; ++i) {
+        data[i] = acc_snapshot;
+        decode_gyro_data(raw_fifo + i * GYRO_FIFO_FRAME_SIZE, data[i]);
+    }
+
+    result.sample_count = samples_to_read;
     return true;
 }
 
@@ -383,26 +440,50 @@ bool Bmi088Driver::initialize()
 // ---------------------------------------------------------
 bool Bmi088Driver::read_imu_data(ImuRawData& data)
 {
-    uint8_t acc_raw[6] = {};
     uint8_t gyro_raw[6] = {};
 
-    if (!acc_bus_->read_burst(acc::DATA_START, acc_raw, 6) || !gyro_bus_->read_burst(gyro::DATA_START, gyro_raw, 6)) {
+    if (!read_acc_data(data) || !gyro_bus_->read_burst(gyro::DATA_START, gyro_raw, 6)) {
+        return false;
+    }
+
+    decode_gyro_data(gyro_raw, data);
+    return true;
+}
+
+bool Bmi088Driver::read_acc_data(ImuRawData& data)
+{
+    uint8_t acc_raw[6] = {};
+    if (!acc_bus_->read_burst(acc::DATA_START, acc_raw, 6)) {
         return false;
     }
 
     const int16_t raw_ax = static_cast<int16_t>((acc_raw[1] << 8) | acc_raw[0]);
     const int16_t raw_ay = static_cast<int16_t>((acc_raw[3] << 8) | acc_raw[2]);
     const int16_t raw_az = static_cast<int16_t>((acc_raw[5] << 8) | acc_raw[4]);
-    const int16_t raw_gx = static_cast<int16_t>((gyro_raw[1] << 8) | gyro_raw[0]);
-    const int16_t raw_gy = static_cast<int16_t>((gyro_raw[3] << 8) | gyro_raw[2]);
-    const int16_t raw_gz = static_cast<int16_t>((gyro_raw[5] << 8) | gyro_raw[4]);
-
     data.ax = raw_ax * acc_scale_;
     data.ay = raw_ay * acc_scale_;
     data.az = raw_az * acc_scale_;
+    return true;
+}
+
+bool Bmi088Driver::read_gyro_fifo_status(size_t& frame_count, bool& overrun)
+{
+    uint8_t status = 0;
+    if (!gyro_bus_->read_reg(gyro::FIFO_STATUS, &status)) {
+        return false;
+    }
+
+    overrun = (status & 0x80) != 0;
+    frame_count = static_cast<size_t>(status & 0x7F);
+    return true;
+}
+
+void Bmi088Driver::decode_gyro_data(const uint8_t* raw, ImuRawData& data)
+{
+    const int16_t raw_gx = static_cast<int16_t>((raw[1] << 8) | raw[0]);
+    const int16_t raw_gy = static_cast<int16_t>((raw[3] << 8) | raw[2]);
+    const int16_t raw_gz = static_cast<int16_t>((raw[5] << 8) | raw[4]);
     data.gx = raw_gx * gyro_scale_ - gyro_bias_x_;
     data.gy = raw_gy * gyro_scale_ - gyro_bias_y_;
     data.gz = raw_gz * gyro_scale_ - gyro_bias_z_;
-
-    return true;
 }

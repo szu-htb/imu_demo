@@ -3,6 +3,8 @@
 
 #include "imu_demo/bus_interface.hpp"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -32,6 +34,8 @@ public:
     bool read_burst(uint8_t start_reg, uint8_t* data, size_t len) override;
 
 private:
+    static constexpr size_t kMaxTransferBytes = 640;
+
     bool spi_transfer(const uint8_t* tx, uint8_t* rx, size_t len);
     void cs_low();
     void cs_high();
@@ -40,6 +44,9 @@ private:
     int cs_fd_;
     uint32_t speed_hz_;
     bool has_dummy_byte_;
+    // 预分配 burst 事务缓冲区，覆盖 gyro FIFO 100 帧 + SPI 头字节
+    std::array<uint8_t, kMaxTransferBytes> tx_buffer_{};
+    std::array<uint8_t, kMaxTransferBytes> rx_buffer_{};
 };
 
 #endif  // SPI_BUS_HPP_

@@ -29,6 +29,9 @@ struct Bmi088Config {
     // 上电自检：默认开启，YAML 写 enable_self_test: false 可跳过
     bool enable_self_test = true;
 
+    // 陀螺仪 FIFO：默认关闭，开启后由节点层轮询排空并逐帧发布
+    bool use_gyro_fifo = false;
+
     // 陀螺仪零偏校准样本数：0 = 跳过校准
     size_t calibration_samples = 500;
 };
@@ -41,6 +44,12 @@ struct ImuRawData {
 class Bmi088Driver {
 public:
     using LogCallback = std::function<void(const std::string&)>;
+    static constexpr size_t kGyroFifoMaxFrames = 100;
+
+    struct FifoReadResult {
+        size_t sample_count = 0;
+        bool overrun = false;
+    };
 
     explicit Bmi088Driver(
         const Bmi088Config& config, LogCallback log = [](const std::string&) {});
@@ -48,6 +57,7 @@ public:
 
     bool initialize();
     bool read_imu_data(ImuRawData& data);
+    bool read_imu_fifo_data(ImuRawData* data, size_t capacity, FifoReadResult& result);
 
 private:
     void boot_sequence();
@@ -55,10 +65,14 @@ private:
     void perform_gyro_self_test();
     void soft_reset_sensors();
     void configure_sensors();
+    void configure_fifo();
     void calibrate_gyro();
 
     // 读取 ACC 原始 ADC（自检用，不经 scale 转换）
     void read_acc_raw(int16_t& ax, int16_t& ay, int16_t& az);
+    bool read_acc_data(ImuRawData& data);
+    bool read_gyro_fifo_status(size_t& frame_count, bool& overrun);
+    void decode_gyro_data(const uint8_t* raw, ImuRawData& data);
 
     Bmi088Config config_;
     LogCallback log_;

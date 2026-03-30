@@ -155,23 +155,27 @@ bool SpiBusInterface::read_reg(uint8_t reg, uint8_t* out)
 
 bool SpiBusInterface::read_burst(uint8_t start_reg, uint8_t* data, size_t len)
 {
-    // BMI088 burst 最多读 6 字节数据，加头最多 8 字节，用固定大小 buffer
-    uint8_t tx[32] = {};
-    uint8_t rx[32] = {};
+    const size_t transfer_len = has_dummy_byte_ ? (len + 2) : (len + 1);
+    if (transfer_len > tx_buffer_.size()) {
+        return false;
+    }
+
+    std::memset(tx_buffer_.data(), 0, transfer_len);
+    std::memset(rx_buffer_.data(), 0, transfer_len);
 
     if (has_dummy_byte_) {
         // ACC：1（地址）+ 1（dummy）+ len（数据）
-        tx[0] = start_reg | 0x80;
-        if (!spi_transfer(tx, rx, len + 2))
+        tx_buffer_[0] = start_reg | 0x80;
+        if (!spi_transfer(tx_buffer_.data(), rx_buffer_.data(), transfer_len))
             return false;
-        memcpy(data, rx + 2, len);
+        std::memcpy(data, rx_buffer_.data() + 2, len);
     }
     else {
         // GYRO：1（地址）+ len（数据）
-        tx[0] = start_reg | 0x80;
-        if (!spi_transfer(tx, rx, len + 1))
+        tx_buffer_[0] = start_reg | 0x80;
+        if (!spi_transfer(tx_buffer_.data(), rx_buffer_.data(), transfer_len))
             return false;
-        memcpy(data, rx + 1, len);
+        std::memcpy(data, rx_buffer_.data() + 1, len);
     }
     return true;
 }

@@ -8,11 +8,13 @@ bmi088_node:
     spi_speed_hz: 5000000
 
     publish_rate_hz: 200
+    fifo_poll_rate_hz: 200
     frame_id: "imu_link"
 
     acc_range_g: 6
     gyro_range_dps: 500
     acc_odr_hz: 200
     gyro_odr_hz: 1000
+    use_gyro_fifo: true
     
     enable_self_test: true

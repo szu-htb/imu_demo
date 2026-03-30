@@ -23,12 +23,20 @@ constexpr uint8_t CHIP_ID_VALUE = 0x1E;
 namespace gyro {
 constexpr uint8_t CHIP_ID = 0x00;
 constexpr uint8_t DATA_START = 0x02;
+constexpr uint8_t INI_STATUS_1 = 0x09;
 constexpr uint8_t RANGE = 0x0F;
 constexpr uint8_t BANDWIDTH = 0x10;
 constexpr uint8_t LPM1 = 0x11;
 constexpr uint8_t SELF_TEST = 0x3C;
 constexpr uint8_t SOFT_RESET = 0x14;
 constexpr uint8_t CHIP_ID_VALUE = 0x0F;
+
+// FIFO 相关寄存器（规格书 §4.3.7）
+constexpr uint8_t FIFO_EXT_INT_S = 0x34;
+constexpr uint8_t FIFO_STATUS = 0x0E;
+constexpr uint8_t FIFO_CONF_0 = 0x3D;
+constexpr uint8_t FIFO_CONF_1 = 0x3E;
+constexpr uint8_t FIFO_DATA = 0x3F;
 }  // namespace gyro
 
 constexpr uint8_t SOFT_RESET_CMD = 0xB6;
