@@ -2,7 +2,6 @@
 
 #include <rclcpp_components/register_node_macro.hpp>
 
-#include <algorithm>
 #include <chrono>
 #include <functional>
 
@@ -53,47 +52,15 @@ ImuNode::ImuNode(const rclcpp::NodeOptions& options) : Node("bmi088_node", optio
                                     std::bind(&ImuNode::timer_callback, this));
 }
 
-double ImuNode::median3(double a, double b, double c)
-{
-    if (a > b)
-        std::swap(a, b);
-    if (b > c)
-        std::swap(b, c);
-    if (a > b)
-        std::swap(a, b);
-    return b;
-}
-
-ImuRawData ImuNode::apply_median_filter(const ImuRawData& data)
-{
-    median_buf_[median_count_ % kMedianWindow] = data;
-    ++median_count_;
-
-    if (median_count_ < kMedianWindow) {
-        return data;
-    }
-
-    const auto& b = median_buf_;
-    ImuRawData out;
-    out.ax = median3(b[0].ax, b[1].ax, b[2].ax);
-    out.ay = median3(b[0].ay, b[1].ay, b[2].ay);
-    out.az = median3(b[0].az, b[1].az, b[2].az);
-    out.gx = median3(b[0].gx, b[1].gx, b[2].gx);
-    out.gy = median3(b[0].gy, b[1].gy, b[2].gy);
-    out.gz = median3(b[0].gz, b[1].gz, b[2].gz);
-    return out;
-}
-
 void ImuNode::publish_sample(const ImuRawData& raw, const rclcpp::Time& stamp)
 {
-    ImuRawData filtered = apply_median_filter(raw);
     msg_.header.stamp = stamp;
-    msg_.linear_acceleration.x = filtered.ax;
-    msg_.linear_acceleration.y = filtered.ay;
-    msg_.linear_acceleration.z = filtered.az;
-    msg_.angular_velocity.x = filtered.gx;
-    msg_.angular_velocity.y = filtered.gy;
-    msg_.angular_velocity.z = filtered.gz;
+    msg_.linear_acceleration.x = raw.ax;
+    msg_.linear_acceleration.y = raw.ay;
+    msg_.linear_acceleration.z = raw.az;
+    msg_.angular_velocity.x = raw.gx;
+    msg_.angular_velocity.y = raw.gy;
+    msg_.angular_velocity.z = raw.gz;
     pub_->publish(msg_);
 }
 

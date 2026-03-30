@@ -23,6 +23,16 @@ static constexpr size_t GYRO_FIFO_FRAME_SIZE = 6;
 static constexpr uint8_t GYRO_FIFO_STREAM_XYZ = 0x80;
 static constexpr uint8_t GYRO_FIFO_WATERMARK_DISABLED = 0x00;
 
+static void throw_read_error(const std::string& context)
+{
+    throw std::runtime_error("BMI088 read failed: " + context);
+}
+
+static void throw_write_error(const std::string& context)
+{
+    throw std::runtime_error("BMI088 write failed: " + context);
+}
+
 // ---------------------------------------------------------
 // 构造：根据 bus_type 创建对应的总线实现
 // ---------------------------------------------------------
@@ -86,23 +96,35 @@ void Bmi088Driver::boot_sequence()
 {
     // dummy read → CSB1 上升沿触发 ACC 从 I2C 切换到 SPI 模式（规格书§6.1.2）
     uint8_t dummy;
-    acc_bus_->read_reg(acc::CHIP_ID, &dummy);
+    if (!acc_bus_->read_reg(acc::CHIP_ID, &dummy)) {
+        throw_read_error("ACC dummy read CHIP_ID during boot");
+    }
     usleep(1000);
 
     // ACC 唤醒：Suspend → Active → Enable（规格书§4.4）
-    acc_bus_->write_reg(acc::PWR_CONF, 0x00);
+    if (!acc_bus_->write_reg(acc::PWR_CONF, 0x00)) {
+        throw_write_error("ACC write PWR_CONF during boot");
+    }
     usleep(500);  // 规格书要求 ≥450μs
-    acc_bus_->write_reg(acc::PWR_CTRL, 0x04);
+    if (!acc_bus_->write_reg(acc::PWR_CTRL, 0x04)) {
+        throw_write_error("ACC write PWR_CTRL during boot");
+    }
     usleep(50000);  // 规格书要求 ≥1ms，留 50ms 余量确保稳定
 
     // GYRO 确认处于 Normal 模式
-    gyro_bus_->write_reg(gyro::LPM1, 0x00);
+    if (!gyro_bus_->write_reg(gyro::LPM1, 0x00)) {
+        throw_write_error("GYRO write LPM1 during boot");
+    }
     usleep(10000);
 
     // 验证 Chip ID
     uint8_t acc_id, gyro_id;
-    acc_bus_->read_reg(acc::CHIP_ID, &acc_id);
-    gyro_bus_->read_reg(gyro::CHIP_ID, &gyro_id);
+    if (!acc_bus_->read_reg(acc::CHIP_ID, &acc_id)) {
+        throw_read_error("ACC read CHIP_ID during boot");
+    }
+    if (!gyro_bus_->read_reg(gyro::CHIP_ID, &gyro_id)) {
+        throw_read_error("GYRO read CHIP_ID during boot");
+    }
     if (acc_id != acc::CHIP_ID_VALUE || gyro_id != gyro::CHIP_ID_VALUE) {
         char buf[64];
         snprintf(buf, sizeof(buf), "BMI088 Chip ID mismatch: ACC=0x%02X GYRO=0x%02X", acc_id, gyro_id);
@@ -119,7 +141,9 @@ void Bmi088Driver::boot_sequence()
 void Bmi088Driver::read_acc_raw(int16_t& ax, int16_t& ay, int16_t& az)
 {
     uint8_t raw[6] = {};
-    acc_bus_->read_burst(acc::DATA_START, raw, 6);
+    if (!acc_bus_->read_burst(acc::DATA_START, raw, 6)) {
+        throw_read_error("ACC burst read raw data");
+    }
     ax = static_cast<int16_t>((raw[1] << 8) | raw[0]);
     ay = static_cast<int16_t>((raw[3] << 8) | raw[2]);
     az = static_cast<int16_t>((raw[5] << 8) | raw[4]);
@@ -132,24 +156,34 @@ void Bmi088Driver::read_acc_raw(int16_t& ax, int16_t& ay, int16_t& az)
 void Bmi088Driver::perform_acc_self_test()
 {
     // 临时量程：24G range + 1600Hz normal mode
-    acc_bus_->write_reg(acc::RANGE, 0x03);
-    acc_bus_->write_reg(acc::CONF, 0xAC);
+    if (!acc_bus_->write_reg(acc::RANGE, 0x03)) {
+        throw_write_error("ACC write RANGE during self-test setup");
+    }
+    if (!acc_bus_->write_reg(acc::CONF, 0xAC)) {
+        throw_write_error("ACC write CONF during self-test setup");
+    }
     usleep(3000);  // 规格书要求 >2ms
 
     // 正激励
-    acc_bus_->write_reg(acc::SELF_TEST, 0x0D);
+    if (!acc_bus_->write_reg(acc::SELF_TEST, 0x0D)) {
+        throw_write_error("ACC write SELF_TEST positive polarity");
+    }
     usleep(55000);  // 规格书要求 >50ms
     int16_t pos_x, pos_y, pos_z;
     read_acc_raw(pos_x, pos_y, pos_z);
 
     // 负激励
-    acc_bus_->write_reg(acc::SELF_TEST, 0x09);
+    if (!acc_bus_->write_reg(acc::SELF_TEST, 0x09)) {
+        throw_write_error("ACC write SELF_TEST negative polarity");
+    }
     usleep(55000);
     int16_t neg_x, neg_y, neg_z;
     read_acc_raw(neg_x, neg_y, neg_z);
 
     // 关闭自检
-    acc_bus_->write_reg(acc::SELF_TEST, 0x00);
+    if (!acc_bus_->write_reg(acc::SELF_TEST, 0x00)) {
+        throw_write_error("ACC disable SELF_TEST");
+    }
     usleep(55000);  // 等传感器回稳
 
     // 阈值检查：|pos - neg| 的原始 ADC 值
@@ -184,13 +218,17 @@ void Bmi088Driver::perform_acc_self_test()
 void Bmi088Driver::perform_gyro_self_test()
 {
     // bit0 = bist_en，写 1 触发
-    gyro_bus_->write_reg(gyro::SELF_TEST, 0x01);
+    if (!gyro_bus_->write_reg(gyro::SELF_TEST, 0x01)) {
+        throw_write_error("GYRO trigger SELF_TEST");
+    }
 
     // 轮询 bit1(bist_rdy)，通常 <10ms
     uint8_t status = 0;
     for (int i = 0; i < 50; ++i) {
         usleep(1000);
-        gyro_bus_->read_reg(gyro::SELF_TEST, &status);
+        if (!gyro_bus_->read_reg(gyro::SELF_TEST, &status)) {
+            throw_read_error("GYRO read SELF_TEST during BIST polling");
+        }
         if (status & 0x02) {
             break;
         }
@@ -213,8 +251,12 @@ void Bmi088Driver::perform_gyro_self_test()
 // ---------------------------------------------------------
 void Bmi088Driver::soft_reset_sensors()
 {
-    acc_bus_->write_reg(acc::SOFT_RESET, bmi088_regs::SOFT_RESET_CMD);
-    gyro_bus_->write_reg(gyro::SOFT_RESET, bmi088_regs::SOFT_RESET_CMD);
+    if (!acc_bus_->write_reg(acc::SOFT_RESET, bmi088_regs::SOFT_RESET_CMD)) {
+        throw_write_error("ACC write SOFT_RESET");
+    }
+    if (!gyro_bus_->write_reg(gyro::SOFT_RESET, bmi088_regs::SOFT_RESET_CMD)) {
+        throw_write_error("GYRO write SOFT_RESET");
+    }
     usleep(50000);  // 等待两颗芯片复位完成
 }
 
@@ -304,21 +346,35 @@ void Bmi088Driver::configure_sensors()
             throw std::invalid_argument("Unsupported gyro_odr_hz: " + std::to_string(config_.gyro_odr_hz));
     }
 
-    acc_bus_->write_reg(acc::RANGE, acc_range_reg);
-    acc_bus_->write_reg(acc::CONF, acc_conf_reg);
+    if (!acc_bus_->write_reg(acc::RANGE, acc_range_reg)) {
+        throw_write_error("ACC write RANGE during configure");
+    }
+    if (!acc_bus_->write_reg(acc::CONF, acc_conf_reg)) {
+        throw_write_error("ACC write CONF during configure");
+    }
     usleep(1000);
 
-    gyro_bus_->write_reg(gyro::RANGE, gyro_range_reg);
-    gyro_bus_->write_reg(gyro::BANDWIDTH, gyro_bandwidth_reg);
+    if (!gyro_bus_->write_reg(gyro::RANGE, gyro_range_reg)) {
+        throw_write_error("GYRO write RANGE during configure");
+    }
+    if (!gyro_bus_->write_reg(gyro::BANDWIDTH, gyro_bandwidth_reg)) {
+        throw_write_error("GYRO write BANDWIDTH during configure");
+    }
     usleep(1000);
 }
 
 void Bmi088Driver::configure_fifo()
 {
-    gyro_bus_->write_reg(gyro::FIFO_EXT_INT_S, 0x00);
+    if (!gyro_bus_->write_reg(gyro::FIFO_EXT_INT_S, 0x00)) {
+        throw_write_error("GYRO write FIFO_EXT_INT_S during FIFO setup");
+    }
     // 先写 FIFO_CONF_0 再写 FIFO_CONF_1，让最终配置写同时清空 FIFO 和 overrun 状态。
-    gyro_bus_->write_reg(gyro::FIFO_CONF_0, GYRO_FIFO_WATERMARK_DISABLED);
-    gyro_bus_->write_reg(gyro::FIFO_CONF_1, GYRO_FIFO_STREAM_XYZ);
+    if (!gyro_bus_->write_reg(gyro::FIFO_CONF_0, GYRO_FIFO_WATERMARK_DISABLED)) {
+        throw_write_error("GYRO write FIFO_CONF_0 during FIFO setup");
+    }
+    if (!gyro_bus_->write_reg(gyro::FIFO_CONF_1, GYRO_FIFO_STREAM_XYZ)) {
+        throw_write_error("GYRO write FIFO_CONF_1 during FIFO setup");
+    }
     log_("GYRO FIFO configured: stream mode, XYZ, tag off");
 }
 
@@ -415,7 +471,7 @@ bool Bmi088Driver::read_imu_fifo_data(ImuRawData* data, size_t capacity, FifoRea
 
     const size_t samples_to_read = std::min(std::min(frame_count, capacity), Bmi088Driver::kGyroFifoMaxFrames);
     const size_t bytes_to_read = samples_to_read * GYRO_FIFO_FRAME_SIZE;
-    uint8_t raw_fifo[Bmi088Driver::kGyroFifoMaxFrames * GYRO_FIFO_FRAME_SIZE] = {};
+    uint8_t raw_fifo[Bmi088Driver::kGyroFifoMaxFrames * GYRO_FIFO_FRAME_SIZE];
 
     ImuRawData acc_snapshot = {};
     if (!read_acc_data(acc_snapshot)) {

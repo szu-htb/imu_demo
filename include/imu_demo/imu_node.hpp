@@ -30,9 +30,6 @@ private:
     void publish_sample(const ImuRawData& raw, const rclcpp::Time& stamp);
     void publish_fifo_samples(const ImuRawData* raw_samples, size_t sample_count, const rclcpp::Time& newest_stamp);
 
-    static double median3(double a, double b, double c);
-    ImuRawData apply_median_filter(const ImuRawData& data);
-
     std::unique_ptr<Bmi088Driver> driver_;
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr pub_;
     rclcpp::TimerBase::SharedPtr poll_timer_;
@@ -43,11 +40,6 @@ private:
     // 预分配消息，避免热路径每帧零初始化协方差数组
     sensor_msgs::msg::Imu msg_;
     std::array<ImuRawData, Bmi088Driver::kGyroFifoMaxFrames> fifo_buf_{};
-
-    // 中值滤波：窗口 3 的环形 buffer
-    static constexpr size_t kMedianWindow = 3;
-    std::array<ImuRawData, kMedianWindow> median_buf_{};
-    size_t median_count_ = 0;
     int64_t gyro_sample_period_ns_ = 0;
     bool use_gyro_fifo_ = false;
     bool fifo_overrun_warned_ = false;
