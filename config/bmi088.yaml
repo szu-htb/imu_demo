@@ -1,20 +1,14 @@
 bmi088_node:
   ros__parameters:
-    bus_type: "spi"
-
-    spi_device: "/dev/spidev1.0"
-    acc_cs_gpio: 394
-    gyro_cs_gpio: 396
-    spi_speed_hz: 5000000
-
-    publish_rate_hz: 200
-    fifo_poll_rate_hz: 200
     frame_id: "imu_link"
+    output_topic: "imu/data_calibrated"
+
+    iio_device_path: "/dev/iio:device1"
+    iio_sysfs_dir: "/sys/bus/iio/devices/iio:device1"
+    buffer_length: 128
+    poll_timeout_ms: 200
 
     acc_range_g: 6
     gyro_range_dps: 500
-    acc_odr_hz: 200
-    gyro_odr_hz: 1000
-    use_gyro_fifo: true
-    
-    enable_self_test: true
+    accel_sampling_hz: 400
+    gyro_sampling_hz: 400
